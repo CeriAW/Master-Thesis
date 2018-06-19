@@ -1,0 +1,140 @@
+---
+title: "Step 1: Data Preparation"
+author: "Ceri Ann Williams"
+date: "6/3/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Required packages
+```{r, include=FALSE}
+library(jsonlite)
+library(dplyr) 
+library(tidyr)
+library(DT)
+library(ggplot2) 
+library(stringr)
+library(readr)
+```
+
+# Load and filter data
+The Yelp Datasets can be downloaded here:
+When loading the data in the code below:
+- "review.json" refers to the Reviews dataset
+- "business.json" refers to the Business dataset
+- "yelp_user" refers to the User dataset
+```{r}
+#load data sets
+##review
+yelp_reviews <- stream_in(con = file("review.json"))
+reviews <- flatten(yelp_reviews)
+rm(yelp_reviews)
+#number of observations: 4,736,897
+reviews$date <- as.Date(reviews$date)
+
+#filter dates: 21.10.2015 - 26.01.2017
+subset_date <- reviews %>% filter(date >= as.Date("2015-10-21") & date <= as.Date("2017-01-26"))
+#number of observations: 1,276,961
+
+##business
+yelp_business <- stream_in(con = file("business.json"))
+business <- flatten(yelp_business)
+rm(yelp_business)
+#number of observations: 156,639
+
+##user
+yelp_user <- read_csv(file = "yelp_user.csv")
+#number of observations: 1,326,100
+
+#merge 3 data sets
+total <- merge(business, reviews, by="business_id")
+#number of observations: 4,736,897
+final <- merge(total, yelp_user, by="user_id")
+#number of observations: 4,700,938
+
+#filter by date
+subset_date2 <- final %>% filter(date >= as.Date("2015-10-21") & date <= as.Date("2017-01-26"))
+#number of observations: 1,268,595
+summary(subset_date2$date)
+
+#filter category: "restaurants"
+#flatten categories vector
+final$categories <- vapply(final$categories, paste, collapse = ", ", character(1L))
+restaurant_reviews <- subset(subset_date2, grepl("Food|Restaurants", subset_date2$categories))
+#number of observations: 845,764
+
+#take random subset of 15,000 observations
+set.seed(3107)
+final <- restaurant_reviews[sample(1:nrow(restaurant_reviews), 15000, replace=FALSE), ]
+```
+
+The above taken sample will be used for further analysis
+```{r}
+sample <- read_csv(file="Dataset1.csv")
+colnames(sample)
+```
+
+# Add DV - Helpfulness
+Binary variable:
+- 0 if not helpful (= no useful votes) 
+- 1 if helpful (= at least one useful vote)
+```{r}
+#Overall
+sample$DV <- ifelse(sample$useful.x == 0, 0, 1)
+t1 <- table(sample$DV)
+prop.table(t1)
+
+#Distribution of reviews in this time frame
+summary(sample$date2)
+ggplot(sample, aes(x = date2)) +
+  geom_histogram()
+```
+
+# Descriptives of subsample
+- Distribution of DV
+  Not Helpful: 9,770 (65.1%)
+  Helpful: 5,230 (34.9%)
+```{r}
+sample %>% group_by(DV) %>% summarise(n=n()) %>% mutate(freq = n / sum(n))
+```
+
+# Overall
+- Total number of reviews: 15,000
+- Total number of businesses: 9,305
+- Total number of users: 13,774
+- Timeframe: 21.10.2015 - 26.01.2017
+```{r}
+sample %>% group_by(review_id) %>% summarise(count=n())
+sample %>% group_by(business_id) %>% summarise(count=n())
+sample %>% group_by(user_id) %>% summarise(count=n())
+max(sample$date2)
+min(sample$date2)
+```
+
+# Review descriptives
+-	Distribution of star ratings of reviews
+```{r}
+ggplot(sample, aes(x = stars.x)) +
+  geom_histogram()
+```
+
+-	Average number of useful votes per review: 0.8482
+```{r}
+summary(sample$useful.x)
+```
+
+# Variable selection
+Filter only variables needed for further analysis
+```{r}
+sample <- sample %>% select(review_id, user_id, DV, text, stars.y, date2, review_count.y, elite, fans, yelping_since, compliment_hot, compliment_more, compliment_profile, compliment_cute, compliment_list, compliment_note, compliment_photos, compliment_writer, compliment_funny, compliment_cool, compliment_plain)
+
+colnames(sample)
+```
+
+# Save data
+```{r}
+write.csv(sample, file="Dataset2.csv")
+```
