@@ -1,0 +1,690 @@
+---
+title: "Step 2: Feature Engineering"
+author: "Ceri Ann Williams"
+date: "6/3/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr) 
+library(textcat) 
+library(dplyr) 
+library(qdap)
+library(tidyr) 
+library(quanteda) 
+library(tidytext) 
+library(reshape)
+library(hunspell) 
+library(udpipe) 
+library(lexicon)
+```
+
+# Load data
+```{r}
+mysample <- read_csv(file = "subsamplefinal_2.csv")
+sample <- read_csv(file="Dataset2.csv")
+```
+
+###### Only English Reviews ######
+filter so that only English reviews are included 
+-> exclude 189 reviews
+```{r}
+sample$language <- textcat(sample$text)
+sample$language <- as.factor(sample$language)
+levels(sample$language)
+w = table(sample$language)
+w #keep english & scots
+df <- sample %>%
+  filter(language == c('english') | language == c('scots'))
+rm(eng, sample, w, scots)
+```
+
+###### First round of cleaning ######
+- Remove "\", space before a comma and extra spaces before endmarks
+- Remove "<U+00E9>" which is replacement for special characters (e.g. é)
+```{r}
+text_df <- data_frame(df$review_id, df$text)
+names(text_df)[names(text_df) == 'df$review_id'] <- 'review_id'
+names(text_df)[names(text_df) == 'df$text'] <- 'text'
+
+text_df$text <- base::gsub("<U+00E9>", "", text_df$text, fixed = TRUE)
+
+text_df$text <- scrubber(text_df$text, 
+                             num2word = FALSE, 
+                             rm.quote = TRUE, 
+                             fix.comma = TRUE,
+                             fix.space = TRUE)
+df$text[999]
+text_df$text[999]
+df$text[768]
+text_df$text[768]
+```
+
+###### Sum of Compliments ######
+- variable: total compliments a user has received
+```{r}
+df$reviewer_compliments <- df$compliment_cool + df$compliment_cute + df$compliment_funny + df$compliment_hot + df$compliment_list + df$compliment_more + df$compliment_note + df$compliment_plain + df$compliment_photos + df$compliment_profile + df$compliment_writer
+```
+
+# Keep only the variables that are needed
+```{r}
+df <- df %>% select(review_id, user_id, DV, text, stars.y, date2, review_count.y, elite, fans, yelping_since, reviewer_compliments)
+```
+
+###### Present IVs ######
+- Review Star Rating: review_stars
+- Count of reviews user has written: reviewer_review_count
+- Count of compliments the user has received: reviewer_compliments
+- Count of fans the user has: reviewer_fans
+- Since when has the user been a Yelp member: reviewer_join_date
+- Date the review was written: review_date
+```{r}
+names(df)[names(df) == 'stars.y'] <- 'review_stars'
+names(df)[names(df) == 'review_count.y'] <- 'reviewer_review_count'
+names(df)[names(df) == 'fans'] <- 'reviewer_fans'
+names(df)[names(df) == 'yelping_since'] <- 'reviewer_join_date'
+names(df)[names(df) == 'date2'] <- 'review_date'
+```
+
+###### Feature Engineering ######
+Includes:
+- Count of years user was Elite: reviewer_elite
+- Length of review in characters with spaces: review_length_char_w
+- Length of review in characters without spaces: review_length_char_wo
+- Length of review in words: review_length_words
+- Length of review in sentences: review_length_sentences
+- Count of expressive punctuation: review_ex_punctuation
+- Count of upper case letters: review_upper_letters
+
+# Reviewer Elite
+```{r}
+#make sure package plyr is not loaded
+df$elite <- as.character(df$elite)
+elite_data <- df %>% select(user_id, elite)
+
+elite2 <- elite_data[!duplicated(elite_data$user_id),]
+head(elite2)
+
+elite2$elite <- as.character(elite2$elite)
+
+e <- elite2 %>%
+  transform(elite = strsplit(elite, ",")) %>% unnest()
+e
+e2 <- e %>% group_by(user_id) %>% count()
+View(e2)
+
+e2$n[e2$n == 1] <- 0
+e2
+
+df <- merge(df, e2, by = "user_id")
+rm(e)
+rm(e2)
+rm(elite_data)
+
+df$elite <- NULL
+df$user_id <- NULL
+
+names(df)[names(df) == 'n'] <- 'reviewer_elite'
+```
+
+# Review length in characters
+```{r}
+#withouot spaces
+text_df$review_length_char_wo <- character_count(text_df$text)
+
+#with spaces
+#text_df$review_length_char_w <- character_count(text_df$text,count.space = TRUE) 
+#not including this one
+text_df$review_length_char_w <- nchar(text_df$text) #more reliable
+```
+
+# Review length in words
+```{r}
+text_df$review_length_words <- sapply(gregexpr("\\S+", text_df$text), length)
+text_df$review_length_words[5]
+text_df$text[5]
+```
+
+# Review length in sentences
+```{r}
+text_df$review_length_sentences <- nsentence(text_df$text)
+text_df$review_length_sentences[5]
+```
+
+# Count of expressive punctuation
+- Expressive punctuation = "?" or "!"
+```{r}
+text_df$review_ex_punctuation <- sapply(gregexpr("[!?]", text_df$text), length)
+```
+
+# Count of upper case letters
+```{r}
+text_df$review_upper_letters <- sapply(regmatches(text_df$text, gregexpr("[A-Z]", text_df$text, perl=TRUE)), length)
+text_df$text[4]
+text_df$review_upper_letters[4]
+```
+
+# Add variables to df
+```{r}
+df <- merge(df, text_df, by = "review_id")
+df$text.y <- NULL
+```
+
+###### BOW ######
+using approach from: https://www.tidytextmining.com/index.html
+
+```{r}
+text_df$review_length_char_wo <- NULL
+text_df$review_length_char_w <- NULL
+text_df$review_length_words <- NULL
+text_df$review_length_sentences <- NULL
+text_df$review_ex_punctuation <- NULL
+text_df$review_upper_letters <- NULL
+head(text_df)
+```
+
+transform to a tidy data structure
+-> strips punctuation
+-> converts to lowercase
+```{r}
+tidy_text <- text_df %>%
+  unnest_tokens(word, text)
+head(tidy_text)
+```
+
+# Stopwords
+- Number of stopwords in the review: review_stopwords
+```{r}
+data(stop_words)
+
+#includes 3 dictionaries: onix, SMART and snowball
+stopwords_df <- tidy_text %>%
+  group_by(review_id) %>%
+  inner_join(stop_words)
+```
+
+keep onix lexicon only
+http://www.lextek.com/manuals/onix/stopwords1.html
+```{r}
+stopwords_df <- stopwords_df %>%
+  filter(lexicon == "onix")
+```
+
+count of stopwords per review
+```{r}
+stopwords_count <- stopwords_df %>%
+  group_by(review_id) %>%
+  count()
+```
+
+attach to df
+```{r}
+df <- merge(df, stopwords_count, by = "review_id")
+names(df)[names(df) == 'n'] <- 'review_stopwords'
+```
+
+clear some space
+```{r}
+rm(stopwords_count, stopwords_df)
+```
+
+text without stopwords
+```{r}
+tidy_text_wo_stop <- tidy_text %>%
+  anti_join(stop_words)
+```
+
+# Unique words
+- Proportion of unique words in the review, excluding stopwords: review_prop_unique
+```{r}
+#using data without stopwords
+review_words <- tidy_text_wo_stop %>%
+  count(review_id, word) %>%
+  ungroup()
+
+total_words <- review_words %>%
+  group_by(review_id) %>%
+  summarise(total = sum(n))
+```
+
+combine total_words with review_words
+```{r}
+review_words <- left_join(review_words, total_words)
+```
+
+count the number of unique words in a review
+```{r}
+count.unique <- review_words %>%
+  filter(n == 1) %>%
+  group_by(review_id) %>%
+  count(n)
+```
+
+attach to total words -> divide unique by total to get proportion of unique words
+```{r}
+merge <- inner_join(review_words, count.unique)
+merge$word <- NULL
+merge$n <- NULL
+merge %>%
+  distinct(review_id, keep.all = TRUE)
+
+merge <- merge %>% filter (! duplicated(review_id))
+merge2 <- merge %>%
+  mutate(unique.ratio = nn / total)
+View(merge2)
+```
+
+attach unique word ratio to df
+```{r}
+merge2$total <- NULL
+merge2$nn <- NULL
+df <- merge(df, merge2, by = "review_id")
+names(df)[names(df) == 'unique.ratio'] <- 'review_prop_unique'
+names(df)[names(df) == 'text.x'] <- 'text'
+colnames(df)
+```
+
+clear space
+```{r}
+rm(count.unique, merge, merge2, review_words, stop_words, total_words)
+```
+
+###### Readability ######
+Four readability tests:
+- Automated Readability Index (ARI)
+- Coleman Liau (CLI)
+- Flesch Kincaid
+- Gunning FOG (FOG)
+```{r}
+readability <- textstat_readability(text_df$text, measure = c("ARI", "Coleman.Liau.grade", "Flesch.Kincaid", "FOG"), remove_hyphens = TRUE)
+
+#attach to text_df
+text_df <- cbind(text_df, readability)
+text_df$document <- NULL
+
+#attach to df
+df <- merge(df, text_df, by = "review_id")
+df$text.y <- NULL
+names(df)[names(df) == 'ARI'] <- 'review_read_ARI'
+names(df)[names(df) == 'Coleman.Liau.grade'] <- 'review_read_CLG'
+names(df)[names(df) == 'Flesch.Kincaid'] <- 'review_read_FK'
+names(df)[names(df) == 'FOG'] <- 'review_read_FOG'
+
+#take the average of all four scores
+df <- df %>% mutate(review_readability = (review_read_ARI + review_read_CLG + review_read_FK + review_read_FOG) / 4)
+```
+
+#clean text_df
+```{r}
+text_df$ARI <- NULL
+text_df$Coleman.Liau.grade <- NULL
+text_df$Flesch.Kincaid <- NULL
+text_df$FOG <- NULL
+```
+
+###### Minimal Word Frequency Matrix ######
+
+# One / Two / More letter words
+https://cran.r-project.org/web/packages/qdap/vignettes/tm_package_compatibility.pdf
+
+construct a minimal Word Frequency Matrix
+use text_df
+```{r}
+qdap_wfm <- with(text_df, wfm(text, review_id))
+one <- as.data.frame(qdap_wfm)
+```
+
+Filter one letter words
+```{r}
+one.letter.words <- Filter(qdap_wfm, min = 1, max = 1, count.apostrophe = FALSE)
+one.letter.words <- as.data.frame(one.letter.words)
+View(one.letter.words)
+df$text.x[2]
+```
+
+Filter two letter words
+```{r}
+two.letter.words <- Filter(qdap_wfm, min = 2, max = 2, count.apostrophe = FALSE)
+two.letter.words <- as.data.frame(two.letter.words)
+```
+
+Filter more letter words
+```{r}
+more.letter.words <- Filter(qdap_wfm, min = 3, count.apostrophe = FALSE)
+more.letter.words <- as.data.frame(more.letter.words)
+```
+
+reshape dataframes with one two and more letter words -> use reshape package
+```{r}
+one.letter.words <- t(one.letter.words)
+one.letter.words <- as.data.frame(one.letter.words)
+
+two.letter.words <- t(two.letter.words)
+two.letter.words <- as.data.frame(two.letter.words)
+
+more.letter.words <- t(more.letter.words)
+more.letter.words <- as.data.frame(more.letter.words)
+```
+
+clear space
+```{r}
+rm(one)
+```
+
+sum of one / two / more letter observations
+```{r}
+one.letter.words$count.one <- rowSums(one.letter.words, na.rm = FALSE, dims = 1)
+two.letter.words$count.two <- rowSums(two.letter.words, na.rm = FALSE, dims = 1)
+more.letter.words$count.more <- rowSums(more.letter.words, na.rm = FALSE, dims = 1)
+```
+
+convert row names into variable
+```{r}
+one.letter.words$review_id <- rownames(one.letter.words)
+two.letter.words$review_id <- rownames(two.letter.words)
+more.letter.words$review_id <- rownames(more.letter.words)
+```
+
+merge with df (and delete unnecessary columns)
+```{r}
+one.letter.words <- one.letter.words %>%
+  select(count.one, review_id)
+merge1 <- merge(df, one.letter.words, by="review_id")
+
+two.letter.words <- two.letter.words %>%
+  select(count.two, review_id)
+merge2 <- merge(merge1, two.letter.words, by="review_id")
+
+more.letter.words <- more.letter.words %>%
+  select(count.more, review_id)
+merge3 <- merge(merge2, more.letter.words, by="review_id")
+```
+
+clear some space
+```{r}
+rm(df)
+rm(merge1)
+rm(merge2)
+rm(more.letter.words)
+rm(one.letter.words)
+rm(two.letter.words)
+df <- merge3
+rm(merge3)
+```
+
+rename new variables
+```{r}
+names(df)[names(df) == 'count.one'] <- 'review_one_letter_words'
+names(df)[names(df) == 'count.two'] <- 'review_two_letter_words'
+names(df)[names(df) == 'count.more'] <- 'review_more_letter_words'
+```
+
+# Save
+```{r}
+write.csv(df, file="save2.csv")
+```
+
+###### Spelling Mistakes ######
+- Number of spelling mistakes in a review: review_prop_spelling_mistakes
+
+using hunspell dictionary
+```{r}
+hunspell <- hunspell(text_df$text)
+#hunspell
+text_df$spelling.mistakes <- lengths(hunspell)
+spelling <- text_df
+spelling$text <- NULL
+spelling$value <- NULL
+```
+
+merge with df
+```{r}
+df <- merge(df, spelling, by = "review_id")
+```
+
+create new variable with the ratio
+```{r}
+df$review_prop_spelling_mistakes <- df$spelling.mistakes / df$review_length_words
+df$spelling.mistakes <- NULL
+```
+
+##### POS Tagging #####
+using package udpipe
+write function to apply english
+```{r}
+if (file.exists("english-ud-2.0-170801.udpipe")) 
+  ud_model <- udpipe_load_model(file = "english-ud-2.0-170801.udpipe") else {
+    ud_model <- udpipe_download_model(language = "english")
+    ud_model <- udpipe_load_model(ud_model$file_model)
+}
+```
+
+run function on text_df
+```{r}
+x <- udpipe_annotate(ud_model, text_df$text, doc_id = text_df$review_id)
+x <- as.data.frame(x)
+
+table <- table(x$doc_id, x$upos)
+table
+```
+
+POS tags respectively
+```{r}
+table(x$upos)
+x$Noun <- ifelse(x$upos == "NOUN", 1, 0)
+x$Verb <- ifelse(x$upos == "VERB", 1, 0)
+x$Adjective <- ifelse(x$upos == "ADJ", 1, 0)  
+x$Punctuation <- ifelse(x$upos == "PUNCT", 1, 0)
+x$Pronoun <- ifelse(x$upos == "PRON", 1, 0)
+x$Adverb <- ifelse(x$upos == "ADV", 1, 0)
+x$Numeric <- ifelse(x$upos == "NUM", 1, 0)
+x$X <- ifelse(x$upos == "X", 1, 0)
+x$Adpositions <- ifelse(x$upos == "ADP", 1, 0)
+x$Conjunctions <- ifelse(x$upos == "CCONJ", 1, 0)
+x$Determiners <- ifelse(x$upos == "DET", 1, 0)
+x$Particles <- ifelse(x$upos == "PART", 1, 0)
+x$Symbols <- ifelse(x$upos == "SYM", 1, 0)
+```
+
+count of POS tags respectively
+```{r}
+library(plyr)
+x.noun = ddply(x, .(doc_id), summarise, Noun=sum(Noun), .drop=FALSE)
+x.verb = ddply(x, .(doc_id), summarise, Verb=sum(Verb), .drop=FALSE)
+x.adjective = ddply(x, .(doc_id), summarise, Adjective=sum(Adjective), .drop=FALSE)
+x.punctuation = ddply(x, .(doc_id), summarise, Punctuation=sum(Punctuation), .drop=FALSE)
+x.pronoun = ddply(x, .(doc_id), summarise, Pronoun=sum(Pronoun), .drop=FALSE)
+x.adverb = ddply(x, .(doc_id), summarise, Adverb=sum(Adverb), .drop=FALSE)
+x.numeric = ddply(x, .(doc_id), summarise, Numeric=sum(Numeric), .drop=FALSE)
+x.X = ddply(x, .(doc_id), summarise, X=sum(X), .drop=FALSE)
+x.adpositions = ddply(x, .(doc_id), summarise, Adpositions=sum(Adpositions), .drop=FALSE)
+x.conjunctions = ddply(x, .(doc_id), summarise, Conjunctions=sum(Conjunctions), .drop=FALSE)
+x.determiners = ddply(x, .(doc_id), summarise, Determiners=sum(Determiners), .drop=FALSE)
+x.particles = ddply(x, .(doc_id), summarise, Particles=sum(Particles), .drop=FALSE)
+x.symbols = ddply(x, .(doc_id), summarise, Symbols=sum(Symbols), .drop=FALSE)
+```
+
+merge into a single dataframe
+```{r}
+names(x.noun)[names(x.noun) == 'doc_id'] <- 'review_id'
+df <- merge(x.noun, df, by = "review_id")
+
+names(x.verb)[names(x.verb) == 'doc_id'] <- 'review_id'
+df <- merge(x.verb, df, by = "review_id")
+
+names(x.adjective)[names(x.adjective) == 'doc_id'] <- 'review_id'
+df <- merge(x.adjective, df, by = "review_id")
+
+names(x.punctuation)[names(x.punctuation) == 'doc_id'] <- 'review_id'
+df <- merge(x.punctuation, df, by = "review_id")
+
+names(x.pronoun)[names(x.pronoun) == 'doc_id'] <- 'review_id'
+df <- merge(x.pronoun, df, by = "review_id")
+
+names(x.adverb)[names(x.adverb) == 'doc_id'] <- 'review_id'
+df <- merge(x.adverb, df, by = "review_id")
+
+names(x.numeric)[names(x.numeric) == 'doc_id'] <- 'review_id'
+df <- merge(x.numeric, df, by = "review_id")
+
+names(x.X)[names(x.X) == 'doc_id'] <- 'review_id'
+df <- merge(x.X, df, by = "review_id")
+
+names(x.adpositions)[names(x.adpositions) == 'doc_id'] <- 'review_id'
+df <- merge(x.adpositions, df, by = "review_id")
+
+names(x.conjunctions)[names(x.conjunctions) == 'doc_id'] <- 'review_id'
+df <- merge(x.conjunctions, df, by = "review_id")
+
+names(x.determiners)[names(x.determiners) == 'doc_id'] <- 'review_id'
+df <- merge(x.determiners, df, by = "review_id")
+
+names(x.particles)[names(x.particles) == 'doc_id'] <- 'review_id'
+df <- merge(x.particles, df, by = "review_id")
+
+names(x.symbols)[names(x.symbols) == 'doc_id'] <- 'review_id'
+df <- merge(x.symbols, df, by = "review_id")
+```
+
+rename variables
+```{r}
+names(df)[names(df) == 'Noun'] <- 'review_nouns'
+names(df)[names(df) == 'Verb'] <- 'review_verbs'
+names(df)[names(df) == 'Adjective'] <- 'review_adjectives'
+names(df)[names(df) == 'Punctuation'] <- 'review_punctuation'
+names(df)[names(df) == 'Pronoun'] <- 'review_pronouns'
+names(df)[names(df) == 'Adverb'] <- 'review_adverbs'
+names(df)[names(df) == 'Numeric'] <- 'review_numbers'
+names(df)[names(df) == 'X'] <- 'review_X'
+names(df)[names(df) == 'Adpositions'] <- 'review_adpositions'
+names(df)[names(df) == 'Conjunctions'] <- 'review_conjunctions'
+names(df)[names(df) == 'Determiners'] <- 'review_determiners'
+names(df)[names(df) == 'Particles'] <- 'review_particles'
+names(df)[names(df) == 'Symbols'] <- 'review_symbols'
+```
+
+#Clear space
+```{r}
+rm(elite2, spelling, x.adjective, x.noun, x.numeric, x.verb, x.punctuation, x.adpositions, x.conjunctions, x.determiners, x.particles, x.X)
+rm(x.adverb, x.pronoun)
+```
+
+###### Semantic Analysis ######
+- review polarity: review_polarity
+
+Use spread() so that negative and positive sentiment are in separate columns, then calculate a net sentiment (pos - neg) -> Using "bing" lexicon
+```{r}
+#unload package plyr
+library(tidyr)
+library(dplyr)
+library(tidytext)
+review_polarity <- tidy_text %>%
+  left_join(get_sentiments("bing")) %>%
+  count(review_id, sentiment) %>%
+  spread(sentiment, n, fill = 0, drop = FALSE) %>%
+  mutate(sentiment = positive - negative)
+```
+
+attach sentiment to df
+```{r}
+df <- merge(df, review_polarity, by = "review_id")
+df$negative <- NULL
+df$positive <- NULL
+names(df)[names(df) == 'sentiment'] <- 'review_polarity'
+```
+
+#### CHECK ####
+```{r}
+colnames(df)
+```
+
+# Filter only the features used in analysis
+```{r}
+df <- df %>% select(DV, review_symbols, review_particles, review_determiners, review_conjunctions, review_adpositions, review_numbers, review_adverbs, review_pronouns, review_punctuation, review_adjectives, review_verbs, review_nouns, review_stars, review_date, review_length_char_wo, review_length_char_w, review_length_words, review_length_sentences, review_ex_punctuation, review_upper_letters, review_stopwords, review_prop_unique, review_readability, review_one_letter_words, review_two_letter_words, review_more_letter_words, review_prop_spelling_mistakes, review_polarity, reviewer_review_count, reviewer_fans, reviewer_join_date, reviewer_compliments, reviewer_elite)
+
+colnames(df)
+```
+
+#### PROPORTIONS #####
+-> standardize
+
+# With total number of words
+```{r}
+#POS
+df$review_prop_nouns <- df$review_nouns / df$review_length_words
+df$review_nouns <- NULL
+
+df$review_prop_verbs <- df$review_verbs / df$review_length_words
+df$review_verbs <- NULL
+
+df$review_prop_adverbs <- df$review_adverbs / df$review_length_words
+df$review_adverbs <- NULL
+
+df$review_prop_pronouns <- df$review_pronouns / df$review_length_words
+df$review_pronouns <- NULL
+
+df$review_prop_adjectives <- df$review_adjectives / df$review_length_words
+df$review_adjectives <- NULL
+
+df$review_prop_particles <- df$review_particles / df$review_length_words
+df$review_particles <- NULL
+
+df$review_prop_determiners <- df$review_determiners / df$review_length_words
+df$review_determiners <- NULL
+
+df$review_prop_conjunctions <- df$review_conjunctions / df$review_length_words
+df$review_conjunctions <- NULL
+
+df$review_prop_adpositions <- df$review_adpositions / df$review_length_words
+df$review_adpositions <- NULL
+
+df$review_prop_numbers <- df$review_numbers / df$review_length_words
+df$review_numbers <- NULL
+
+#Stopwords
+df$review_prop_stopwords <- df$review_stopwords / df$review_length_words
+df$review_stopwords <- NULL
+
+#One / two / more letter words
+df$review_prop_one_letter_words <- df$review_one_letter_words / df$review_length_words
+df$review_one_letter_words <- NULL
+
+df$review_prop_two_letter_words <- df$review_two_letter_words / df$review_length_words
+df$review_two_letter_words <- NULL
+
+df$review_prop_more_letter_words <- df$review_more_letter_words / df$review_length_words
+df$review_more_letter_words <- NULL
+```
+
+# With total number of characters excluding white spaces
+```{r}
+df$review_prop_symbols <- df$review_symbols / df$review_length_char_wo
+df$review_symbols <- NULL
+
+df$review_prop_punctuation <- df$review_punctuation / df$review_length_char_wo
+df$review_punctuation <- NULL
+
+df$review_prop_ex_punctuation <- df$review_ex_punctuation / df$review_length_char_wo
+df$review_ex_punctuation <- NULL
+
+df$review_prop_uppercase <- df$review_upper_letters / df$review_length_char_wo
+df$review_upper_letters <- NULL
+```
+
+# Check
+```{r}
+colnames(df)
+summary(df)
+```
+
+# SAVE
+```{r}
+write.csv(df, file="DatasetFinal.csv")
+```
+
+
+
