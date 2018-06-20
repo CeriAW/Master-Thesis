@@ -1,0 +1,296 @@
+---
+title: "Final Predictive Models"
+author: "Ceri Ann Williams"
+date: "6/15/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages
+```{r}
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(caret)
+library(forcats)
+library(ggplot2)
+library(e1071)
+library(rpart.plot)
+library(glmnet)
+```
+
+Load data
+```{r}
+df <- read_csv(file = "DatasetFinal.csv")
+df$X1 <- NULL
+```
+
+Convert target variable to binary factor
+```{r}
+df$DV <- as.factor(df$DV)
+df <- df %>% mutate(DV = fct_recode(DV, yes = "1", no = "0"))
+```
+
+Split into train and test
+```{r}
+#look at distribution of reviews across dates
+ggplot(df, aes(x = review_date)) +
+  geom_histogram()
+
+#test set = newest three months
+test <- df %>%
+ filter(review_date >= as.Date("2016-10-26") & review_date <= as.Date("2017-01-26"))
+summary(test$review_date)
+
+#training set 
+train <- df %>%
+ filter(review_date <= as.Date("2016-10-25"))
+summary(train$review_date)
+```
+
+training and test data without reviewer features
+```{r}
+test_wo <- test %>% select(DV, review_stars, review_date, review_length_char_wo, review_length_char_w, review_length_words, review_length_sentences, review_prop_unique, review_readability, review_prop_spelling_mistakes, review_polarity, review_prop_nouns, review_prop_verbs, review_prop_adverbs, review_prop_pronouns, review_prop_adjectives, review_prop_particles, review_prop_determiners, review_prop_conjunctions, review_prop_adpositions, review_prop_numbers, review_prop_stopwords, review_prop_one_letter_words, review_prop_two_letter_words, review_prop_more_letter_words, review_prop_symbols, review_prop_punctuation, review_prop_ex_punctuation, review_prop_uppercase)
+
+train_wo <- train %>% select(DV, review_stars, review_date, review_length_char_wo, review_length_char_w, review_length_words, review_length_sentences, review_prop_unique, review_readability, review_prop_spelling_mistakes, review_polarity, review_prop_nouns, review_prop_verbs, review_prop_adverbs, review_prop_pronouns, review_prop_adjectives, review_prop_particles, review_prop_determiners, review_prop_conjunctions, review_prop_adpositions, review_prop_numbers, review_prop_stopwords, review_prop_one_letter_words, review_prop_two_letter_words, review_prop_more_letter_words, review_prop_symbols, review_prop_punctuation, review_prop_ex_punctuation, review_prop_uppercase)
+```
+
+#### Logistic Regression ####
+### Without reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                              initialWindow = 10000,
+                              horizon = 2000,
+                              fixedWindow = TRUE)
+
+set.seed(1208)
+lr_without <- train(DV ~ ., 
+                  data = train_wo,
+                  method = "glm",
+                  family = binomial(link = "logit"),
+                  trControl = TimeControl)
+
+lr_without
+
+#predict
+lr_test_wo <- predict(lr_without, newdata = test_wo, type = "raw")
+head(lr_test_wo)
+
+#confusion matrix
+confusionMatrix(data = lr_test_wo, reference = test_wo$DV, positive = "yes", mode = "everything")
+
+t1 <- table(actual = test_wo$DV, predicted = lr_test_wo)
+t1
+prop.table(t1)
+```
+
+### With reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                              initialWindow = 10000,
+                              horizon = 2000,
+                              fixedWindow = TRUE)
+
+set.seed(1208)
+lr <- train(DV ~ ., 
+                  data = train,
+                  method = "glm",
+                  family = binomial(link = "logit"),
+                  trControl = TimeControl)
+
+lr
+
+#predict
+lr_test <- predict(lr, newdata = test, type = "raw")
+head(lr_test)
+
+#confusion matrix
+confusionMatrix(data = lr_test, reference = test$DV, positive = "yes", mode = "everything")
+t2 <- table(actual = test$DV, predicted = lr_test)
+t2
+prop.table(t2)
+
+#Coefficients
+lr$finalModel
+data_lr <- summary(lr)
+data_lr
+data <- as.tibble(data_lr)
+write.csv(data_lr, file = "coefficients.csv")
+```
+
+#### DECISION TREE ####
+### Without reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                            initialWindow = 10000,
+                            horizon = 2000,
+                            fixedWindow = TRUE,
+                            selectionFunction = "oneSE")
+
+set.seed(1208)
+dt_wo <- train(DV ~ ., data = train_wo,
+            method = "rpart",
+            tuneLength = 20,
+            trControl = TimeControl,
+            metric = "Kappa")
+dt_wo
+
+#predict
+dt_test_wo <- predict(dt_wo, newdata = test_wo, type = "raw")
+head(dt_test_wo)
+
+#confusion matrix
+confusionMatrix(data = dt_test_wo, reference = test_wo$DV, 
+                positive = "yes", mode = "everything")
+
+t3 <- table(actual = test_wo$DV, predicted = dt_test_wo)
+t3
+prop.table(t3)
+```
+
+### With reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                            initialWindow = 10000,
+                            horizon = 2000,
+                            fixedWindow = TRUE,
+                            selectionFunction = "oneSE")
+
+set.seed(1208)
+dt <- train(DV ~ ., data = train,
+            method = "rpart",
+            tuneLength = 20,
+            trControl = TimeControl,
+            metric = "Kappa")
+dt
+
+#predict
+dt_test <- predict(dt, newdata = test, type = "raw")
+head(dt_test)
+
+#confusion matrix
+confusionMatrix(data = dt_test, reference = test$DV, 
+                positive = "yes", mode = "everything")
+
+t4 <- table(actual = test$DV, predicted = dt_test)
+t4
+prop.table(t4)
+
+#variable importance
+varImp(dt, useModel = TRUE)
+dtImp <- varImp(dt)
+dtImp
+plot(dtImp, top = 29)
+
+#plot tree
+dtplot <- prp(dt$finalModel, tweak = 1.5, compress = TRUE, ycompress = TRUE, box.col = "darkblue", branch = 0, gap = 1, col = "white")
+
+dt$finalModel
+```
+
+#### LASSO REGRESSION #####
+### Without reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                            initialWindow = 10000,
+                            horizon = 2000,
+                            fixedWindow = TRUE,
+                            selectionFunction = "oneSE")
+
+tuneGrid <- expand.grid(alpha = 1, 
+                        lambda = 10^(seq(from = -4, to = -2, length.out = 20)))
+
+set.seed(1208)
+lasso_caret_wo <- train(DV ~ ., 
+                     data = train_wo, 
+                     method = "glmnet",
+                     family = "binomial",
+                     trControl = TimeControl, 
+                     tuneGrid = tuneGrid,
+                     metric = "Kappa")
+lasso_caret_wo
+
+#plot lambda
+ggplot(lasso_caret_wo) +
+  scale_x_log10()
+
+#predict
+lasso_caret_test_wo <- predict(lasso_caret_wo, newdata = test_wo, type = "raw")
+head(lasso_caret_test_wo)
+
+#confusion matrix
+confusionMatrix(data = lasso_caret_test_wo, reference = test_wo$DV, 
+                positive = "yes", mode = "everything")
+t5 <- table(actual = test_wo$DV, predicted = lasso_caret_test_wo)
+t5
+prop.table(t5)
+
+#variable importance
+varImp(lasso_caret_wo)
+coefficients_wo <- coef(lasso_caret_wo$finalModel, lasso_caret_wo$bestTune$lambda)
+coefficients_wo
+```
+
+#### LASSO REGRESSION #####
+### With reviewer-related features ###
+```{r}
+#train
+set.seed(1208)
+TimeControl <- trainControl(method = "timeslice",
+                            initialWindow = 10000,
+                            horizon = 2000,
+                            fixedWindow = TRUE,
+                            selectionFunction = "oneSE")
+
+tuneGrid <- expand.grid(alpha = 1, 
+                        lambda = 10^(seq(from = -4, to = -2, length.out = 20)))
+
+set.seed(1208)
+lasso_caret <- train(DV ~ ., 
+                     data = train, 
+                     method = "glmnet",
+                     family = "binomial",
+                     trControl = TimeControl, 
+                     tuneGrid = tuneGrid,
+                     metric = "Kappa")
+lasso_caret
+
+#plot lambda
+ggplot(lasso_caret) +
+  scale_x_log10()
+
+#predict
+lasso_caret_test <- predict(lasso_caret, newdata = test, type = "raw")
+head(lasso_caret_test)
+
+#confusion matrix
+confusionMatrix(data = lasso_caret_test, reference = test$DV, 
+                positive = "yes", mode = "everything")
+t6 <- table(actual = test$DV, predicted = lasso_caret_test)
+t6
+prop.table(t6)
+
+#variable importance
+varImp(lasso_caret, useModel = TRUE)
+lassoImp <- varImp(lasso_caret)
+lassoImp
+plot(lassoImp, top = 30)
+
+#Coefficients
+coefficients <- coef(lasso_caret$finalModel, lasso_caret$bestTune$lambda)
+coefficients
+```
+
