@@ -174,7 +174,6 @@ df$text.y <- NULL
 ```
 
 ###### BOW ######
-using approach from: https://www.tidytextmining.com/index.html
 
 ```{r}
 text_df$review_length_char_wo <- NULL
@@ -328,7 +327,6 @@ text_df$FOG <- NULL
 ###### Minimal Word Frequency Matrix ######
 
 # One / Two / More letter words
-https://cran.r-project.org/web/packages/qdap/vignettes/tm_package_compatibility.pdf
 
 construct a minimal Word Frequency Matrix
 use text_df
@@ -420,11 +418,6 @@ rename new variables
 names(df)[names(df) == 'count.one'] <- 'review_one_letter_words'
 names(df)[names(df) == 'count.two'] <- 'review_two_letter_words'
 names(df)[names(df) == 'count.more'] <- 'review_more_letter_words'
-```
-
-# Save
-```{r}
-write.csv(df, file="save2.csv")
 ```
 
 ###### Spelling Mistakes ######
