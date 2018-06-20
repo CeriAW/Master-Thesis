@@ -17,7 +17,6 @@ library(tidyr)
 library(DT)
 library(ggplot2) 
 library(stringr)
-library(readr)
 ```
 
 # Load and filter data
