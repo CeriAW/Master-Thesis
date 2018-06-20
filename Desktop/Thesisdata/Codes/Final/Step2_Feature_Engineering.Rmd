@@ -25,7 +25,6 @@ library(lexicon)
 
 # Load data
 ```{r}
-mysample <- read_csv(file = "subsamplefinal_2.csv")
 sample <- read_csv(file="Dataset2.csv")
 ```
 
