@@ -43,7 +43,7 @@ rm(eng, sample, w, scots)
 ```
 
 ###### First round of cleaning ######
-- Remove \, space before a comma and extra spaces before endmarks
+- Remove slash, space before a comma and extra spaces before endmarks
 - Remove <U+00E9> which is replacement for special characters (e.g. é)
 ```{r}
 text_df <- data_frame(df$review_id, df$text)
